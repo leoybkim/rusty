@@ -4,4 +4,5 @@ This repository contains sample codes from the [The Rust Programming Language](h
 
 [1. Getting Started](chapter1/README.md)\
 [2. Programming a Guessing Game](chapter2/README.md)\
-[3. Common Programming Concepts](chapter3/README.md)
+[3. Common Programming Concepts](chapter3/README.md)\
+[4. Understanding Ownership](chapter4/README.md)
