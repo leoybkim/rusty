@@ -34,12 +34,74 @@ fn ownership() {
 }
 
 fn reference_and_borrowing() {
-    println!("============ 4.1 What is Ownership =============");
+    println!("============ 4.2 References and Borrowing =============");
+
+    let s1 = String::from("hello");
+    let len = calculate_length_ref(&s1);
+    println!("The length of '{s1}' is {len}\n\n");
+
+    // Mutable reference
+    let mut s = String::from("hello");
+    change(&mut s);
+    let r1 = &mut s;
+    // let r2 = &mut s;
+    // println!("{r1} and {r2}"); // This will throw error at compile time because you cannot
+    // borrow `s` as mutable more  than once at a time
+    println!("{r1}");
+
+    // Multiple mutable reference in a separate scope
+    multi_ref_separate_scope();
+
+    // Cannot combine mutable and immutable reference simultaneously
+    let mut ss = String::from("hello");
+
+    let r3 = &ss; // no problem
+    let r4 = &ss; // no problem
+    // let r5 = &mut ss; // BIG PROBLEM
+
+    println!("{r3} and {r4}");
+    // Variables r3 and r4 will not be used after this point.
+
+    let r5 = &mut ss; // no problem
+    println!("{r5}");
+
+    let reference_s = no_dangle();
+    println!("{reference_s}");
 }
 
 fn slice_type() {
-    println!("============ 4.1 What is Ownership =============");
+    println!("============ 4.3 The Slice Type =============");
+    let mut s = String::from("hello world");
+    let word = first_word(&s);
+
+    // s.clear(); // will error
+    println!("{word}");
+
+    let my_string = String::from("hello world");
+
+    // `first_word` works on slices of `String`s, whether partial or whole.
+    let _word = first_word(&my_string[0..6]);
+    let _word = first_word(&my_string[..]);
+    // `first_word` also works on references to `String`s, which are equivalent
+    // to whole slices of `String`s.
+    let _word = first_word(&my_string);
+
+    let my_string_literal = "hello world";
+
+    // `first_word` works on slices of string literals, whether partial or
+    // whole.
+    let _word = first_word(&my_string_literal[0..6]);
+    let _word = first_word(&my_string_literal[..]);
+
+    // Because string literals *are* string slices already,
+    // this works too, without the slice syntax!
+    let _word = first_word(my_string_literal);
+
+    let a = [1,2,3,4,5];
+    let slice = &a[1..3];
+    assert_eq!(slice, &[2,3]);
 }
+
 
 fn some_scope() {
     let s = String::from("hello"); // s comes into scope
@@ -64,6 +126,7 @@ fn another_scope() {
     let s3 = takes_and_gives_back(s2); // s2 is moved into
                                        // takes_and_gives_back, which also
                                        // moves its return value into s3
+    println!("s1: {s1}, s3: {s3}, s2 was moved so we cannot print it");
 } // Here, s3 goes out of scope and is dropped. s2 was moved, so nothing
   // happens. s1 goes out of scope and is dropped.
 
@@ -102,4 +165,52 @@ fn calculate_length(s: String) -> (String, usize) {
     let length = s.len(); // len() returns the length of a String
 
     (s, length)
+}
+
+fn calculate_length_ref(s: &String) -> usize {
+    // s.push_str(", world"); // This will throw error because you are not allowed to modify a borrowed value
+    s.len()
+} // Here, s goes out of scope. But because s does not have ownership of what
+  // it refers to, the String is not dropped.
+
+fn change(some_string: &mut String) {
+    // can edit mutable reference
+    some_string.push_str(", world");
+}
+
+fn multi_ref_separate_scope() {
+    let mut s = String::from("hello");
+
+    {
+        let _r1 = &mut s;
+    } // _r1 goes out of scope here, so we can make a new reference with no problems.
+
+    let r2 = &mut s;
+    println!("{r2}");
+}
+
+/*
+fn dangle() -> &String { // dangle returns a reference to a String
+
+    let s = String::from("hello"); // s is a new String
+
+    &s // we return a reference to the String, s
+} // Here, s goes out of scope and is dropped, so its memory goes away.
+  // Danger!
+*/
+
+fn no_dangle() ->String{
+    let s = String::from("hello");
+    s
+}
+
+fn first_word(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    for (i, &item) in bytes.iter().enumerate() {
+        if item == b' ' {
+            return &s[0..i];
+        }
+    }
+
+    &s[..]
 }
