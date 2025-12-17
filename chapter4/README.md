@@ -12,6 +12,35 @@ Both the stack and the heap are parts of memory available to your code to use at
 **Stack**:
 - stores value in the order it gets them and removes th evaluates in the opposite order (LIFO)
 - all data stored on the stack must have a known, fixed size
+- Variables live in the stack
+    - Variables live in frames. A frame is a mapping from variables to values within a single scope, such as a function. Frames are organized into a stack of currently-called-functions
+    - ```rust
+        fn main() {
+            let n = 5; // L1
+            let y = plus_one(n); // L3
+            println!("The value of y is: {y}");
+        }
+
+        fn plus_one(x: i32) -> i32 {
+            x + 1 // L2
+        }
+      ```
+      - The frame for `main` at `L1` holds `n=5`
+      - The frame for `plus_one` at `L2` holds `x=5`
+      - The frame for `main` at `L3` holds `n=5;y=6`
+    - After a function returns, Rust deallocates the function's frame (freeing or dropping)
+    - This sequence of frames is called a stack because the most recent frame added is always the next frame freed
+    - When an expression reads a variable, the variable's value is copied from its slot in the stack frame
+        - ```rust
+          let a = 5; // L1
+          let mut b = a; // L2
+          b += 1; // L3
+          ```
+        - L1 Stack main |a|5|
+        - L2 Stack main |a|5|
+                        |b|5|
+        - L3 Stack main |a|5|
+                        |b|6|
 
 **Heap**:
 - request a certain amount of space to put data on heap
@@ -212,12 +241,124 @@ The ampersands represent references, and they allow you to refer to some value w
 
 We call the action of creating a reference *borrowing*. Just as variables are immutable by default, so are references. We're not allowed to modify something we have a reference to.
 
+```rust
+let mut x: Box<i32> = Box::new(1);
+let a: i32 = *x;         // *x reads the heap value, so a = 1
+*x += 1;                 // *x on the left-side modifies the heap value,
+                         //     so x points to the value 2
+
+let r1: &Box<i32> = &x;  // r1 points to x on the stack
+let b: i32 = **r1;       // two dereferences get us to the heap value
+
+let r2: &i32 = &*x;      // r2 points to the heap value directly
+let c: i32 = *r2;        // so only one dereference is needed to read it
+```
+
+You probably won't see the dereference operator very often when you read Rust code. Rust implicitly inserts dereferences and references in certain cases, such as calling a method with the dot operator.
+
+```rust
+let x: Box<i32> = Box::new(-1);
+let x_abs1 = i32::abs(*x); // explicit dereference
+let x_abs2 = x.abs();      // implicit dereference
+assert_eq!(x_abs1, x_abs2);
+
+let r: &Box<i32> = &x;
+let r_abs1 = i32::abs(**r); // explicit dereference (twice)
+let r_abs2 = r.abs();       // implicit dereference (twice)
+assert_eq!(r_abs1, r_abs2);
+
+let s = String::from("Hello");
+let s_len1 = str::len(&s); // explicit reference
+let s_len2 = s.len();      // implicit reference
+assert_eq!(s_len1, s_len2);
+```
+
+Pointers are a powerful and dangerous feature because they enable aliasing. Aliasing is accessing the same data through different variables. On its own, aliasing is harmlss. But combined with mutation, we have a recipe for disaster.
+- by deallocating the aliased data, leaving the other variable to point to deallocated memory
+- by mutating the aliased data, invalidating runtime properties expected by the other variable
+- by concurrently mutating the aliased data, causing a data race with nondeterministic behaviour for the other variable
+
+
+Example program using vector data structer, `vec`. Unlike arrays which have a fixed length, vectors have a variable length by storing their elements in the heap.
+
+```rust
+fn main() {
+    let mut v: Vec<i32> = vec![1, 2, 3]; // macro vec! creates vector with the elements between the brackets
+    v.push(4);
+}
+```
+
+`v` allocates a heap array of certain *capacity*. If the vector is at capacity. To allow `push`, it has to create a new allocation with larger capacity, copy all the elements over, and deallocate the original heap array. In the above example, the array `1 2 3 4` is in a (potentially) different memory location than the original array `1 2 3`.
+
+```rust
+fn main() {
+    let mut v: Vec<i32> = vec![1, 2, 3];
+    let num: &i32 = &v[2]; // L1
+    v.push(4); // L2
+    println!("Third element is {}", *num); // L3
+}
+```
+
+The operation `v.push(4)` resizes `v`. The resize will deallocate the previous array and allocate a new bigger array. In the process, `num` is left pointing to invalid memory. Therefore at L3, dereferencing `*num` reads invalid memory, causing undefined behaviour.
+In more abstract terms, the issue is that the vector `v` is both aliased (by the reference `num`) and mutated (by the operation `v.push(4)`).
+
+Pointer Safety Principle: data should never be aliased and mutated at the same time.
+Data can be aliased. Data can be mutated. But data cannot be both aliased and mutated. For example, Rust enforces this principle for boxes (owned pointers) by disallowing aliasing. Assigning a box from one variable to another will move ownership, invalidating the previous variable. Owned data can only be accessed through the owner - no aliases.
+However, because references are non-owning pointers, they need different rules than boxes to ensure the Pointer Safety Principle.
+
+The core idea behind the borrow checker is that variables have three kinds of permissions on their data:
+- Read: data can be copied to another location
+- Write: data can be mutated
+- Owned: data can be moved or dropped
+
+These permissions don't exist at runtime, only within the compiler. By default, a variable has read/own permissions on its data. If a variable is annotated with `let mut`, then it also has the write permission. The key idea is that references can temporarily remove these permissions.
+
+
+Let’s walk through each line:
+
+1. After `let mut v = (...)`, the variable `v` has been initialized. It gains +R+W+O permissions 
+2. After `let num = &v[2]`, the data in `v` has been borrowed by `num`. Three things happen:
+   - The borrow removes WO permissions from `v`. `v` cannot be written or owned, but it can still be read
+   - The variable `num` has gained RO permissions. `num` is not writable because it was not marked `let mut`
+   - The place `*num` has gained the R permission 
+3. After `println!(...)`, then `num` is no longer in use, so `v` is no longer borrowed. Therefore:
+   - `v` regains its WO permissions
+   - `num` and `*num` have lost all of their permissions
+4. After `v.push(4)`, then `v` is no longer in use, and it loses all of its permissions
+
+Permissions are defined on **places** and not just variables. A place is anything you can put on the lef-hand side of an assignment. Places include:
+- variables, like `a`
+- dereferences of places, like `*a`
+- array accesses of places, like `a[0]`
+- fields of places, like `a.0` for uples or `a.field for structs
+- any combination of the above, like `*((*a)[0].1)`
+
+Creating a reference to data ("borrowing" it) causes that data to be temporarily read-only until the reference is no longer in use.
+Rust uses these permissions in its *borrow checker* The borrow checker looks for potentially unsafe operations involving references.
+
+If you try to compile this program, then the Rust compiler will return the following error:
+```shell
+error[E0502]: cannot borrow `v` as mutable because it is also borrowed as immutable
+ --> test.rs:4:1
+  |
+3 | let num: &i32 = &v[2];
+  |                  - immutable borrow occurs here
+4 | v.push(4);
+  | ^^^^^^^^^ mutable borrow occurs here
+5 | println!("Third element is {}", *num);
+  |                                 ---- immutable borrow later used here
+```
+
+The error message explains that `v` cannot be mutated while the reference `num` is in use. That's the surface-level reason. The underlying issus that `num` could be invalidated by `push`. Rust catches that potential violation of memory safety.
+
+
 ### Mutable References
 You can allow modification of a borrowed value with *mutable reference* created with `&mut`. If you have a mutable reference to a value, you can have no other references to that value.
 The restriction preventing multiple mutable references to the same data at the same time allows for mutation but in a very controlled fashion. The benefit of having this restriction is that Rust can prevent data races at compile time. A *data race* is similar to a race condition and happens when these three behaviours occur:
 - 2 or more pointers access the same data at the same time
 - at least one of the pointers is being used to write to the data
 - there's no mechanism being used to synchronize access to the data
+
 Data races cause undefined behaviour and can be difficult to diagnose and fix when you're trying to track them down at runtime; Rust prevents this problem by refusing to compile code with data races!
 
 As always, we can use curly brackets to create a new scope, allowing for multiple mutable references, just not *simultaneous* ones:
@@ -251,6 +392,440 @@ let r3 = &mut s; // no problem
 println!("{r3}");
 ```
 
+
+
+```rust
+fn main() {
+    let mut v: Vec<i32> = vec![1, 2, 3];
+    let num: &mut i32 = &mut v[2];
+    *num += 1;
+    println!("Third element is {}", *num);
+    println!("Vector is now {:?}", v);
+}
+```
+1. When `num` was an immutable reference, `v` still had R permission. Now that `num` is a mutable reference,`v` has lot all permissions while `num` is in use
+2. When `num` was an immutable reference, the place `*num` only had R permission. Now that `num` is a mutalbe reference, `*num` has also gained the W permission
+
+Mutable reference can also be temporarily "downgraded" to read-only references
+
+```rust
+fn main() {
+    let mut v: Vec<i32> = vec![1, 2, 3];
+    let num: &mut i32 = &mut v[2];
+    let num2: &i32 = &*num;
+    println!("{} {}", *num, *num2);
+}
+```
+The borrow `&*num` removes the W permission from `*num` but not the R permission. So `println!(..)` can read both `*num` and `*num2`. 
+
+The phrase "in use" is describing a reference's **lifetime**, or the range of code spanning from its birth (where the reference is created) to its death (the last time(s) the reference is used).
+
+```rust
+fn main() {
+    let mut x = 1;
+    let y = &x; // life time of y starts here
+    let z = *y; // life time of y ends here, and the W permission on x is returned to x
+    x += z;
+}
+```
+
+```rust
+fn ascii_capitalize(v: &mut Vec<char>) {
+    let c = &v[0];
+    if c.is_ascii_lowercase() {
+        let up = c.to_ascii_uppercase();
+        v[0] = up;
+    } else {
+        println!("Already capitalized: {:?}", v);
+    }
+}
+```
+The variable `c` has a different lifetime in each branch of the if-statement. In the then-block, `c` is used in the expression `c.to_ascii_uppercase()`. Therefore `*v` does not regain the W permission until after that line. Howver, in the else-block, `c` is not used. `*v` immediately regains the W permission on entry to the else-block.
+
+
+As a part of the Pointer Safety Principle, the borrow checker enforces that data must outlive any references to it. Rust enforces this property in two ways. The first way deals with references that are created and dropped within the scope of a single function. For example, say we tried to drop a string while holding a reference to it:
+```rust
+fn main() {
+    let s = String::from("Hello world");
+    let s_ref = &s;
+    drop(s);
+    println!("{}", s_ref);
+}
+```
+The borrow `&s` removes the O permission from `s`. However, `drop` expects the O permission, leading ot a permission mismatch.
+
+But Rust needs a different enforcement mechanism when it doesn't know how long a reference lives. Specifically, when references are either input to a function, or output from a function. For example, here is a safe function that returns a reference to the first element in a vector:
+```rust
+fn first(strings: &Vec<String>) -> &String {
+    let s_ref = &strings[0];
+    s_ref
+}
+```
+
+This snippet introduces a new find of permission, the flow permission F. The F permission is expected whenever an expression uses an input reference like `&strings[0]`, or returns an output reference like `return s_ref`.
+
+Unlike RWO permissions, F does not change throughout the body of a function. A reference has F permission if it's allowed to be used (that is, to flow) in a particular expression.
+
+```rust
+fn first_or<'a, 'b, 'c>(strings: &'a Vec<String>, default: &'b String) -> &'c String {
+    if strings.len() > 0 {
+        &strings[0]
+    } else {
+        default
+    }
+}
+```
+
+This function no longer compiles, because the expression `&string[0]` and `default` lack the necessary F permission to be returned. If Rust just looks at the function signature, it doesn't know whether the output `&String` is a reference to either `strings` or `default`.
+The following program is unsafe if `first_or` allows `default` to flow into the return value. Like the previous example, `drop` could invalidate `s`.
+```rust
+fn main() {
+    let strings = vec![];
+    let default = String::from("default");
+    let s = first_or(&strings, &default);
+    drop(default);
+    println!("{}", s);
+}
+```
+
+```rust
+fn return_a_string() -> &String {
+    let s = String::from("Hello world");
+    let s_ref = &s;
+    s_ref
+}
+```
+This program is also unsafe because the reference `&s` will be invalidated when `return_a_string` returns.
+
+#### Fixing Ownership Errors
+
+Rust will always reject un unsafe program. But sometimes, Rust will also reject a safe program. 
+
+##### Fixing an Unsafe Program: Returning Reference to the Stack
+
+```rust
+fn return_a_string() -> &String {
+    let s = String::from("Hello world");
+    &s
+}
+```
+
+The issue here is with the lifetime of the referred data. If you want to pass around a reference to a string, you have to make sure that the underlying string lives long enough. When the function returns, `s` is dropped. The code attempts to return `&s` but that no longer extsts after the funciton returns. Any pointer/reference to that memory would be a dangling reference. Dereferencing it would be undefined behaviour.
+
+Depending on the situation, here are four ways you can extend the lifetime of the string. 
+
+1. Move ownership of the string out of the function, changing `&string` to `String`:
+
+```rust
+fn return_a_string() -> String {
+    let s = String::from("Hello world");
+    s
+}
+```
+
+2. Return a string literal, which lives forever (indicated by `'static`). This applies if we never intend to change the string, and then a heap allocation is unnecessary:
+```rust
+fn return_a_string() -> &'static str {
+    "Hello world"    
+}
+```
+
+3. Defer borrow-checking to runtime by using garbage collection. For example, you can use a reference-counted pointer:
+```rust
+use std::rc::Rc;
+fn return_a_string() -> Rc<String> {
+    let s = Rc::new(String::from("Hello world"));
+    Rc::clone(&s)
+}
+```
+`Rc::clone` only clones a pointer to `s` and not the data itself. At runtime, the `Rc` checks when the last `Rc` pointing to data has been dropped, and then deallocates the data.
+
+4. Have the caller provide a "slot" to put the string using a mutable reference:
+```rust
+fn return_a_string(output: &mut String) {
+    output.replace_range(.., "Hello world");
+}
+```
+
+With this strategy the caller is responsible for creating space for the string. This style can be verbose, but it can also be more memmory-efficient if the caller needs to carefuly control when allocation occur.
+
+
+##### Fixing an Unsafe Program: Not Enough Permission
+Another common issue is trying to mutate read-only data, or trying to drop data behind a reference.
+
+```rust
+fn stringify_name_with_title(name: &Vec<String>) -> String {
+    name.push(String::from("Esq."));
+    let full = name.join(" ");
+    full
+}
+
+// ideally: ["Ferris", "Jr."] => "Ferris Jr. Esq."
+```
+This program is rejected by the borrow checker because `name` is an immutable reference, but `name.push(..)` requires the W permission. This program is unsafe because `push` could invalidate other references to `name` outside of `stringify_name_with_title`, like this:
+
+
+```rust
+fn stringify_name_with_title(name: &Vec<String>) -> String {
+    name.push(String::from("Esq."));
+    let full = name.join(" ");
+    full
+}
+fn main() {
+    let name = vec![String::from("Ferris")];
+    let first = &name[0];
+    stringify_name_with_title(&name);
+    println!("{}", first);
+}
+```
+
+In this example, a reference `first` to `name[0]` is created before calling `stringify_name_with_title`. The function `name.push(..)` reallocates the contents of `name`, which invalidates `first`, causing the `println` to read deallocated memory.
+
+1. Change the type of name from `&Vec<String>` to `&mut Vec<String>`:
+```rust
+fn stringify_name_with_title(name: &mut Vec<String>) -> String {
+    name.push(String::from("Esq."));
+    let full = name.join(" ");
+    full
+}
+```
+
+But this is not a good solution if the caller is not expecting the function to mutate their inputs. 
+
+2. Take ownership of the name by changing `&Vec<String>` to `Vec<String>`:
+```rust
+fn stringify_name_with_title(mut name: Vec<String>) -> String {
+    name.push(String::from("Esq."));
+    let full = name.join(" ");
+    full
+}
+```
+
+But it is very rare for Rust functions to take ownership of heap-owning dat structures like `Vec` and `String`. This would make the input `name` unusuable.
+
+3. Change the body of the function to clone the input `name`:
+```rust
+fn stringify_name_with_title(name: &Vec<String>) -> String {
+    let mut name_clone = name.clone();
+    name_clone.push(String::from("Esq."));
+    let full = name_clone.join(" ");
+    full
+}
+```
+By cloning, we are allowed to mutate the local copy of the vector. However, the clone copies every string in the input. We can avoid unnecessary copies by adding the suffix later:
+```rust
+fn stringify_name_with_title(name: &Vec<String>) -> String {
+    let mut full = name.join(" ");
+    full.push_str(" Esq.");
+    full
+}
+```
+This solution works because `slice::join` already copies the data in `name` into the string `full`.            
+
+
+##### Fixing an Unsafe Program: Aliasing and Mutating a Data Structure
+
+Another unsafe operation is using a reference to heap data that gets deallocated by another alias. For example, here's a function that gets a reference to the largest string in a vector, and then uses it while mutation the vector:
+
+```rust
+fn add_big_strings(dst: &mut Vec<String>, src: &[String]) {
+    let largest: &String = 
+      dst.iter().max_by_key(|s| s.len()).unwrap();
+    for s in src {
+        if s.len() > largest.len() {
+            dst.push(s.clone());
+        }
+    }
+}
+```
+This program is rejected by the borrow checker because `let largets = ..` removes the W permissions on dst. However, `dst.push(..)` requires the W permission. The program is unsafe because `dst.push(..)` could deallocate the contents of `dst`, invalidating the reference `largest`.
+
+We need to shorten lifetime of `largest` to not overlap with `dst.push(..)`. One possibility is to clone `largest`:
+
+```rust
+fn add_big_strings(dst: &mut Vec<String>, src: &[String]) {
+    let largest: String = dst.iter().max_by_key(|s| s.len()).unwrap().clone();
+    for s in src {
+        if s.len() > largest.len() {
+            dst.push(s.clone());
+        }
+    }
+}
+```
+
+However, this may cause a performance hit for allocating and copying the string data.
+
+Another possiblity is to perform the length comparison first, and then mutate `dst` afterwords:
+
+```rust
+fn add_big_strings(dst: &mut Vec<String>, src: &[String]) {
+    let largest: &String = dst.iter().max_by_key(|s| s.len()).unwrap();
+    let to_add: Vec<String> = 
+        src.iter().filter(|s| s.len() > largest.len()).cloned().collect();
+    dst.extend(to_add);
+}
+```
+However, this also causes a performance hit for allocating the vector `to_add`.
+
+A final possiblilty is to copy out the length of `largest`, since we don't actually need the contents of `largest`, just its length. This solution is arguably the most idiomatic adn most performant:
+
+```rust
+fn add_big_strings(dst: &mut Vec<String>, src: &[String]) {
+    let largest_len: usize = dst.iter().max_by_key(|s| s.len()).unwrap().len();
+    for s in src {
+        if s.len() > largest_len {
+            dst.push(s.clone());
+        }
+    }
+}
+```
+
+
+##### Fixing an Unsafe Program: Copying vs Moving Out of a Collection
+Here's a safe program that copies a number out of a vector:
+
+```rust
+fn main() {
+    let v: Vec<i32> = vec![0, 1, 2];
+    let n_ref: &i32 = &v[0];
+    let n: i32 = *n_ref;
+}
+```
+
+The dereference operation `*n_ref` expects just the R permission, which the path `*n_ref` has. But what happens if we change the type of elements in the vector from `i32` to `String`? Then it turns out we no longer have the necessary permissions:
+
+```rust
+fn main() {
+    let v: Vec<String> = 
+      vec![String::from("Hello world")];
+    let s_ref: &String = &v[0];
+    let s: String = *s_ref;
+}
+```
+
+The issue is that the vector `v` owns the string "Hello world". When we dereference `s_ref`, that tries to take owenership of the string from the vector. But references are non-owning pointers - we can't take ownership through a reference. The program will be unsafe due to double-freeing. After `s` is dropped, "Hello world" is deallocated. Then `v` is dropped, and undefined behaviour happens when the string is freed a second time. However, this undefined behaviour does not happen when the vector contains `i32` elements. The difference is that copying `String` copies a pointer to heap data. Copying an `i32` does not. If a value does not own heap data, then it can be copied without a move. 
+- `i32` does not own heap data, so it can be copied without a move
+- `String` does own heap data, so it can not be copied without a move
+- `&String` does not own heap data, so it can be copied without a move
+
+*Note: one exception to this rule is mutable reference. For example, `&mut i32` is not a copyable type.
+
+```rust
+let mut n = 0;
+let a = &mut n;
+let b = a;
+```
+
+Then `a` cannot be used after being assigned to `b`. That prevents two mutable reference to the same data from being used at the same time.
+
+To safely access an element in vector of non-`Copy` types like `String`:
+
+1. Avoid taking ownership of the string and just use an immutable reference:
+
+```rust
+let v: Vec<String> = vec![String::from("Hello world")];
+let s_ref: &String = &v[0];
+println!("{s_ref}!");
+```
+
+2. Clone the data if you want to get ownership of the string while leaving the vector alone:
+
+```rust
+let v: Vec<String> = vec![String::from("Hello world")];
+let mut s: String = v[0].clone();
+s.push('!');
+println!("{s}");
+```
+
+3. Use a method like `Vec::remove` to move the string out of the vector:
+```rust
+let mut v: Vec<String> = vec![String::from("Hello world")];
+let mut s: String = v.remove(0);
+s.push('!');
+println!("{s}");
+assert!(v.len() == 0);
+```
+
+##### Fixing a Safe Program: Mutating Different Tuple Fields
+```rust
+fn main() {
+    let mut name = (
+        String::from("Ferris"), 
+        String::from("Rustacean")
+    );
+    let first = &name.0;
+    name.1.push_str(", Esq.");
+    println!("{first} {}", name.1);
+}
+```
+
+The statement `let first = &name.0` borrows `name.0`. This borrow removes WO permissions from `name.0`. It also removes WO permissions from `name`. But `name.1` still retains the W permission, so doing `name1.push_str(..)` is a valid operation.
+
+However, Rust can lose track of exactly which places are borrowed. For example, let's say we refactor the expression `&name.0` into a function `get_first`. Ater calling `get_first(&name)`, Rust now removews the W permission on `name.1`.
+
+```rust
+fn get_first(name: &(String, String)) -> &String {
+    &name.0
+}
+
+fn main() {
+    let mut name = (
+        String::from("Ferris"), 
+        String::from("Rustacean")
+    );
+    let first = get_first(&name);
+    name.1.push_str(", Esq.");
+    println!("{first} {}", name.1);
+}
+```
+
+Now we can't do `name.1.push_str(..)`. The problem is that Rust doesn't look at the implementation of `get_first` when deciding what `get_first(&name)` should borrow. Rust only looks at the type signature, which just says "some `String` in the input gets borrowed". Rust conservatively decides then that both `name.0` and `name.1` get borrowed, and eliminates write and own permissions on both.
+
+
+##### Fixing a Safe Program: Mutating Different Array Elements
+
+A similar kind of problem arises when we borrow elements of an array. 
+```rust
+fn main() {
+    let mut a = [0, 1, 2, 3];
+    let x = &mut a[1];
+    *x += 1;
+    println!("{a:?}");
+}
+```
+
+Rust's borrow checker does not contain different places for `a[0]`, `a[1]`, and so on. It uses a single place `a[_]` that represents all indices of `a`. Rust does this because it cannot always determine the value of an index. 
+
+```rust
+fn main() {
+    let mut a = [0, 1, 2, 3];
+    let x = &mut a[1];
+    let y = &a[2];
+    *x += *y;
+}
+```
+
+Rust will reject this program because `a` gave its read permission to `x`. This program is safe. Rust provides a function in the standard library that can work around the borrow checker:
+
+```rust
+let mut a = [0, 1, 2, 3];
+let (a_l, a_r) = a.split_at_mut(2);
+let x = &mut a_l[1];
+let y = &a_r[0];
+*x += *y;
+```
+
+In some Rust libraries, especially core types like `Vec` or `slice`, you will often find `unsafe` blocks. `unsafe` block allow the use of "raw" pointers, which are not checked for safety by the borrow checker. For example, we could use an unsafe block to accomplish our task:
+
+```rust
+let mut a = [0, 1, 2, 3];
+let x = &mut a[1] as *mut i32;
+let y = &a[2] as *const i32;
+unsafe { *x += *y; } // DO NOT DO THIS unless you know what you're doing!
+```
+
+Unsafe code is sometimes ncessary to work around the limitations of the borrow checker. As a general strategy, let's say the borrow checker rejects a program you think is actually safe. Then you should look for standard library functions (like split_at_mut) that contain unsafe blocks which solve your problem.
+ 
 ### Dangling References
 
 In languages with pointers, it's easy to erroneously create a *dangling pointer* - a pointer that references a location in memory that may have been given to someone else - by freeing some memory while preserving a pointer to that  memory. In Rust, by contrast, the compiler guarantees that references will never be dangling references: If you have a reference to some data, the compiler will ensure that the data will not go out of scope before the reference to the data does.

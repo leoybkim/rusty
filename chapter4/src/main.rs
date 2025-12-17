@@ -67,6 +67,26 @@ fn reference_and_borrowing() {
 
     let reference_s = no_dangle();
     println!("{reference_s}");
+
+    let mut v: Vec<i32> = vec![1, 2, 3];
+    let num: &i32 = &v[2];
+    v.push(4);
+    // println!("Third element is {}", *num); // error!
+    
+
+    let mut char_v: Vec<char> = vec!['a', 'b', 'c'];
+    ascii_capitalize(&mut char_v);
+
+
+    let mut strs = vec![
+        String::from("A"), String::from("B")
+    ];
+
+    let first = get_first(&strs);
+    if first.len() > 0 {
+        strs.push(String::from("C"));
+    }
+    println!("strs: {:?}", strs);
 }
 
 fn slice_type() {
@@ -213,4 +233,19 @@ fn first_word(s: &str) -> &str {
     }
 
     &s[..]
+}
+
+fn ascii_capitalize(v: &mut Vec<char>) {
+    let c = &v[0];
+    if c.is_ascii_lowercase() {
+        let up = c.to_ascii_uppercase();
+        v[0] = up;
+        println!("Capitalized: {:?}", v);
+    } else {
+        println!("Already capitalized: {:?}", v);
+    }
+}
+
+fn get_first(v: &Vec<String>) -> &String {
+    &v[0]
 }
