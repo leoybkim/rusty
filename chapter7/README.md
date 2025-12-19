@@ -393,4 +393,131 @@ pub fn eat_at_restaurant() {
 }
 ```
 
+Re-exporting is useful when the internal structure of your code is different from how programmers calling your code would think about the domain. For example, in this restaurant metaphor, the people running the restaurant think about “front of house” and “back of house.” But customers visiting a restaurant probably won’t think about the parts of the restaurant in those terms. With pub use, we can write our code with one structure but expose a different structure. Doing so makes our library well organized for programmers working on the library and programmers calling the library.
 
+### Using External Packages
+
+
+In Chapter 2, we programmed a guessing game project that used an external package called rand to get random numbers. To use rand in our project, we added this line to *Cargo.toml*:
+
+Filename: Cargo.toml
+```toml
+rand = "0.8.5"
+```
+
+Adding `rand` as a dependency in *Cargo.toml* tells Cargo to download the `rand` package and any dependencies from crates.io and make `rand` available to our project.
+
+Then, to bring `rand` definitions into the scope of our package, we added a `use` line starting with the name of the crate, `rand`, and listed the items we wanted to bring into scope.
+
+```rust
+use rand::Rng;
+
+fn main() {
+    let secret_number = rand::thread_rng().gen_range(1..=100);
+}
+```
+
+Members of the Rust community have made many packages available at crates.io, and pulling any of them into your package involves these same steps: listing them in your package’s *Cargo.toml* file and using `use` to bring items from their crates into scope.
+
+Note that the standard `std` library is also a crate that’s external to our package. Because the standard library is shipped with the Rust language, we don’t need to change *Cargo.toml* to include `std`. But we do need to refer to it with `use` to bring items from there into our package’s scope. For example, with `HashMap` we would use this line:
+
+```rust
+use std::collections::HashMap;
+```
+
+### Using Nested Paths to Clean Up `use` Lists
+
+If we’re using multiple items defined in the same crate or same module, listing each item on its own line can take up a lot of vertical space in our files.
+
+Filename: src/main.rs
+```rust
+// --snip--
+use std::cmp::Ordering;
+use std::io;
+// --snip--
+```
+
+Instead, we can use nested paths to bring the same items into scope in one line. We do this by specifying the common part of the path, followed by two colons, and then curly brackets around a list of the parts of the paths that different
+
+Filename: src/main.rs
+```rust
+// --snip--
+use std::{cmp::Ordering, io};
+// --snip--
+```
+
+We can use a nested path at any level in a path, which is useful when combining two use statements that share a subpath. 
+
+Filename: src/lib.rs
+```rust
+use std::io;
+use std::io::Write;
+```
+
+to
+
+```rust
+use std::io::{self, Write};
+```
+
+### Importing Items with the Glob Operator
+
+If we want to bring *all* public items defined in a path into scope, we can specify that path followed by the `*` glob operator:
+
+```rust
+use std::collections::*;
+```
+
+This `use` statement brings all public items defined in `std::collections` into the current scope. Be careful when using the glob operator! Glob can make it harder to tell what names are in scope and where a name used in your program was defined. Additionally, if the dependency changes its definitions, what you’ve imported changes as well, which may lead to compiler errors when you upgrade the dependency if the dependency adds a definition with the same name as a definition of yours in the same scope, for example.
+
+## 7.5 Separating Modules into Different Files
+
+So far, all the examples in this chapter defined multiple modules in one file. When modules get large, you might want to move their definitions to a separate file to make the code easier to navigate.
+
+We’ll extract modules into files instead of having all the modules defined in the crate root file. In this case, the crate root file is *src/lib.rs*, but this procedure also works with binary crates whose crate root file is *src/main.rs*.
+
+
+Filename: src/lib.rs
+```rust
+mod front_of_house;
+
+pub use crate::front_of_house::hosting;
+
+pub fn eat_at_restaurant() {
+    hosting::add_to_waitlist();
+}
+```
+
+Filename: src/front_of_house.rs
+```rust
+pub mod hosting {
+    pub fn add_to_waitlist() {}
+}
+```
+
+Note that you only need to load a file using a `mod` declaration once in your module tree. Once the compiler knows the file is part of the project (and knows where in the module tree the code resides because of where you’ve put the `mod` statement), other files in your project should refer to the loaded file’s code using a path to where it was declared. In other words, `mod` is *not* an "include" operation that you may have seen in other programming languages.
+
+Filename: src/front_of_house.rs
+```rust
+pub mod hosting;
+```
+
+Filename: src/front_of_house/hosting.rs
+```rust
+pub fn add_to_waitlist() {}
+```
+
+### Alternative File Paths
+So far we’ve covered the most idiomatic file paths the Rust compiler uses, but Rust also supports an older style of file path. For a module named `front_of_house` declared in the crate root, the compiler will look for the module’s code in:
+
+- *src/front_of_house.rs* (what we covered)
+- *src/front_of_house/mod.rs* (older style, still supported path)
+
+For a module named hosting that is a submodule of `front_of_house`, the compiler will look for the module’s code in:
+
+- *src/front_of_house/hosting.rs* (what we covered)
+- *src/front_of_house/hosting/mod.rs* (older style, still supported path)
+
+If you use both styles for the same module, you’ll get a compiler error. Using a mix of both styles for different modules in the same project is allowed but might be confusing for people navigating your project.
+
+The main downside to the style that uses files named *mod.rs* is that your project can end up with many files named *mod.rs*, which can get confusing when you have them open in your editor at the same time.
