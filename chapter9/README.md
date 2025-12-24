@@ -369,4 +369,92 @@ When a `main` function returns a `Result<(), E>`, the executable will exit with 
 
 The `main` function may return any types that implement the `std::process::Termination` trait, which contains a function `report` that returns an `ExitCode`. 
 
+## 9.3 To `panic!` or Not to `panic!`
+
+So, how do you decide when you should call `panic!` and when you should return `Result`? When code panics, there’s no way to recover. You could call `panic!` for any error situation, whether there’s a possible way to recover or not, but then you’re making the decision that a situation is unrecoverable on behalf of the calling code. When you choose to return a `Result` value, you give the calling code options. The calling code could choose to attempt to recover in a way that’s appropriate for its situation, or it could decide that an `Err` value in this case is unrecoverable, so it can call `panic!` and turn your recoverable error into an unrecoverable one. Therefore, returning `Result` is a good default choice when you’re defining a function that might fail.
+
+In situations such as examples, prototype code, and tests, it's more appropriate to write code that panics instead of returning a `Result`. 
+
+### Examples, Prototype Code, and Tests
+
+When you're writing an example to illustrate some concept, also including robust error-handling code can make the example less clear. In examples, it's understood that a call to a method like `unwrap` that could panic is meant as a placeholder for the way you'd want your application to handle errors, which can differ based on what the rest of your code is doing.
+
+Similarly, the `unwrap` and `expect` methods are very handy when you're prototyping and you're not yet ready to decide how to handle errors. They leave clear markers in your code for when you're ready to make your program more robust.
+
+If a method call fails in a test, you'd want the whole test to fail, even if that method isn't the functionality under test. Because `panic!` is how a test is marked as a failure, alling `unwrap` or `expect` is exactly what should happen.
+
+### When You Have More Information Than the Compiler
+
+It would also be appropriate to call `expect` when you ave some other logic that ensures that the `Result` will have an `Ok` value, but the logic isn't something the compiler understands. You'll still have a `Result` value that you need to handle: Whatever operation you're calling still has te possibility of failing in general, even though it's logically impossible in your particular situation. If you can ensure by manually inspecting the code that you'll never have an `Err` variant, it's perfectly acceptable to call `except` and document the reason you think you'll never have an `Err` variant in the argument text.
+
+```rust
+    use std::net::IpAddr;
+
+    let home: IpAddr = "127.0.0.1"
+        .parse()
+        .expect("Hardcoded IP address should be valid");
+```
+
+Having hardcoded, valid string doesn't change the return type of the `parse` method. We still get a `Result` value, and the compiler will still make us handle the `Result` as if the `Err` variant is a possibility because the compiler isn't smart enough to see that this string is always a valid IP address. So it's acceptable to use `expect` here.
+
+### Guidelines for Error Handling
+
+It's advisable to have your code panic when it's possible that your code could end up in a bad state. In this context, a *bad state* is when some assumption, guarantee, contract, or invariant has been broken, such as when invalid values, contradictory values, or missing values are passed to your code - plus one or more of the following:
+- the bad state is something that is unexpected, as opposed to something that will likely happen occasionallly like a user entering data in the wrong format.
+- your code after this point needs to rely on not being in this bad state, rather than checking for the problem at every step
+- there's not a good way to encode this information in the types you use
+
+If Someone calls your code and passes in values that don't make sense, it's best to return an error if you can so that the user of the library can decide what they want to do in that case. However, in cases where continuing could be insecure or harmful, the best choice might be to call `panic!` and alert the person using your library to the bug in their code so that they can fix it during development. Similary, `panic!` is often appropriate if you're calling external code that is out your control and returns an invalid state that you have no way of fixing.
+
+
+ Functions often have `contracts`: Their behavior is only guaranteed if the inputs meet particular requirements. Panicking when the contract is violated makes sense because a contract violation always indicates a caller-side bug, and it’s not a kind of error you want the calling code to have to explicitly handle. In fact, there’s no reasonable way for calling code to recover; the calling programmers need to fix the code. Contracts for a function, especially when a violation will cause a panic, should be explained in the API documentation for the function.
+
+
+### Custom Types for Validation
+
+However, having lots of error checks in all of your functions would be verbose and annoying. Fortunately, you can use Rust’s type system (and thus the type checking done by the compiler) to do many of the checks for you. If your function has a particular type as a parameter, you can proceed with your code’s logic knowing that the compiler has already ensured that you have a valid value. For example, if you have a type rather than an `Option`, your program expects to have *something* rather than *nothing*. Your code then doesn’t have to handle two cases for the `Some` and `None` variants: It will only have one case for definitely having a value. Code trying to pass nothing to your function won’t even compile, so your function doesn’t have to check for that case at runtime. Another example is using an unsigned integer type such as `u32`, which ensures that the parameter is never negative.
+
+```rust
+    loop {
+        // --snip--
+
+        let guess: i32 = match guess.trim().parse() {
+            Ok(num) => num,
+            Err(_) => continue,
+        };
+
+        if guess < 1 || guess > 100 {
+            println!("The secret number will be between 1 and 100.");
+            continue;
+        }
+
+        match guess.cmp(&secret_number) {
+            // --snip--
+    }
+```
+ 
+However, this is not an ideal solution: If it were absolutely critical that the program only operated on values between 1 and 100, and it had many functions with this requirement, having a check like this in every function would be tedious (and might impact performance).
+
+Instead, we can make a new type in a dedicated module and put the validations in a function to create an instance of the type rather than repeating the validations everywhere. That way, it’s safe for functions to use the new type in their signatures and confidently use the values they receive.
+
+```rust
+pub struct Guess {
+    value: i32,
+}
+
+impl Guess {
+    pub fn new(value: i32) -> Guess {
+        if value < 1 || value > 100 {
+            panic!("Guess value must be between 1 and 100, got {value}.");
+        }
+
+        Guess { value }
+    }
+
+    pub fn value(&self) -> i32 {
+        self.value
+    }
+}
+```
+
 

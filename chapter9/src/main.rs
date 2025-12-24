@@ -66,9 +66,9 @@ fn read_file_with_match() -> Result<String, io::Error> {
 }
 
 fn read_file_with_unwrap_or_else() {
-    let file = File::open("hello.txt").unwrap_or_else(|error| {
+    let file = File::open("hello2.txt").unwrap_or_else(|error| {
         if error.kind() == ErrorKind::NotFound {
-            File::create("hello.txt").unwrap_or_else(|error| {
+            File::create("hello2.txt").unwrap_or_else(|error| {
                 panic!("Problem creating the file: {error:?}");
             })
         } else {
@@ -78,12 +78,12 @@ fn read_file_with_unwrap_or_else() {
 }
 
 fn read_file_with_unwrap() {
-    let file = File::open("hello.txt").unwrap();
+    let file = File::open("hello3.txt").unwrap();
 }
 
 fn read_file_with_expect() {
-    let file = File::open("hello.txt")
-        .expect("hello.txt should be included in this project");
+    let file = File::open("hello3.txt")
+        .expect("hello3.txt should be included in this project");
 }
 
 
