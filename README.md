@@ -1,6 +1,6 @@
 # The Rust Programming Language
 
-This repository contains sample codes from the [The Rust Programming Language](https://doc.rust-lang.org/stable/book/title-page.html) book.
+This repository contains sample codes from the [The Rust Programming Language](https://doc.rust-lang.org/stable/book/title-page.html) book, [Rust by Example](https://doc.rust-lang.org/rust-by-example/), and [Rustlings](https://rustlings.rust-lang.org/).
 
 [1. Getting Started](chapter1/README.md)\
 [2. Programming a Guessing Game](chapter2/README.md)\
@@ -11,3 +11,4 @@ This repository contains sample codes from the [The Rust Programming Language](h
 [7. Packages, Crates, and Modules](chapter7/README.md)\
 [8. Common Collections](chapter8/README.md)\
 [9. Error Handling](chapter9/README.md)
+
