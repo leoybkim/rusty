@@ -1,6 +1,6 @@
 pub trait Summary {
     fn summarize_author(&self) -> String;
-    
+
     fn summarize(&self) -> String {
         format!("(Read more from {}...)", self.summarize_author())
     }
@@ -27,9 +27,9 @@ pub struct SocialPost {
 }
 
 impl Summary for SocialPost {
-//    fn summarize(&self) -> String {
-//        format!("{}: {}", self.username, self.content)
-//    }
+    //    fn summarize(&self) -> String {
+    //        format!("{}: {}", self.username, self.content)
+    //    }
 
     fn summarize_author(&self) -> String {
         format!("@{}", self.username)
@@ -43,14 +43,11 @@ pub fn notify(item: &impl Summary) {
 fn returns_summarizable() -> impl Summary {
     SocialPost {
         username: String::from("horse_ebooks"),
-        content: String::from(
-            "of course, as you probably already know, people",
-        ),
+        content: String::from("of course, as you probably already know, people"),
         reply: false,
         repost: false,
     }
 }
-
 
 use std::fmt::Display;
 

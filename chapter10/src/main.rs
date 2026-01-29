@@ -63,7 +63,17 @@ impl<X1, Y1> MultiTypePoint<X1, Y1> {
     }
 }
 
-use chapter10::{SocialPost, Summary, NewsArticle};
+use chapter10::{NewsArticle, SocialPost, Summary};
+
+use std::fmt::Display;
+
+fn longest_with_an_announcement<'a, T>(x: &'a str, y: &'a str, ann: T) -> &'a str
+where
+    T: Display,
+{
+    println!("Announcement! {ann}");
+    if x.len() > y.len() { x } else { y }
+}
 
 fn main() {
     let number_list = vec![34, 50, 25, 100, 65];
@@ -97,7 +107,6 @@ fn main() {
     };
 
     println!("1 new post: {}", post.summarize());
-    
 
     let article = NewsArticle {
         headline: String::from("Penguins win the Stanley Cup Championship!"),
@@ -113,9 +122,7 @@ fn main() {
 
     let post = SocialPost {
         username: String::from("horse_ebooks"),
-        content: String::from(
-            "of course, as you probably already know, people",
-        ),
+        content: String::from("of course, as you probably already know, people"),
         reply: false,
         repost: false,
     };
@@ -129,6 +136,13 @@ fn main() {
         let result = longest(string1.as_str(), string2.as_str());
         println!("The longest string is {result}");
     }
+
+    let string3 = String::from("abcd");
+    let string4 = "xyz";
+
+    let result =
+        longest_with_an_announcement(string3.as_str(), string4, "Today is someone's birthday!");
+    println!("The longest string is {result}");
 }
 
 fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {

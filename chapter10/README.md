@@ -664,4 +664,117 @@ Lifetimes on function or method parameters are called *input lifetimes*, and lif
 The compiler uses three rules to figure out the lifetimes of the references when there aren’t explicit annotations. The first rule applies to input lifetimes, and the second and third rules apply to output lifetimes. If the compiler gets to the end of the three rules and there are still references for which it can’t figure out lifetimes, the compiler will stop with an error. These rules apply to `fn` definitions as well as `impl` blocks.
 
 
+The first rule is that the compiler assigns a lifetime parameter to each parameter that’s a reference. In other words, a function with one parameter gets one lifetime parameter: `fn foo<'a>(x: &'a i32);` a function with two parameters gets two separate lifetime parameters: `fn foo<'a, 'b>(x: &'a i32, y: &'b i32);` and so on.
+
+The second rule is that, if there is exactly one input lifetime parameter, that lifetime is assigned to all output lifetime parameters: `fn foo<'a>(x: &'a i32) -> &'a i32`.
+
+The third rule is that, if there are multiple input lifetime parameters, but one of them is `&self` or `&mut self` because this is a method, the lifetime of `self` is assigned to all output lifetime parameters. This third rule makes methods much nicer to read and write because fewer symbols are necessary.
+
+
+Let's pretend we're the compiler. We'll apply these rules to figure out the lifetimes of the references in the signature of the `first_word` function. The signature starts without any lifetimes associated with the references:
+
+```rust
+fn first_word(s: &str) -> &str {
+```
+
+Then, the compiler applies the first rule, which specifies that each parameter gets its own lifetime. We'll call it `'a` as usual, so now the signature is this:
+
+```rust
+fn first_word<'a>(s: &'a str) -> &str {
+```
+
+The second rule applies because there is exactly one input lifetime. The second rule specifies that the lifetime of the one input parameters gets assigned to the output lifetime, so the signature is now this:
+
+```rust
+fn first_word<'a>(s: &'a str) -> &'a str { 
+```
+
+Now all the references in this function signature have lifetimes, and the compiler can continue its analysis without needing the programmer to annotate the lifetimes in this function signature. 
+
+Let's look at another example, this time using the `longest` function that had no lifetime parameters.
+
+```rust
+fn longest(x: &str, y: &str) -> &str {
+```
+
+Let's apply the first rule: Each parameter gets its own lifetime. 
+
+```rust
+fn longest<'a, 'b>(x: &'a str, y: &'b str) -> &str {
+```
+
+The second rule doesn't apply, because there is more than one input lifetime. The third rule doesn't apply either, because `longest` is a function rather than a method, so none of the parameteres are `self`. After working through all three rules, we still haven't figured out what the return type's lifetime is. This is why we got an error trying to compile the code. The compiler worked through the lifetime elision rules but still couldn't figure out all the lifetimes of the references in the signature.
+
+Because the third rule really only applies in method signatures, we'll look at lifetime in that context next to see why the third rule means we don't have to annotate lifetimes in method signatures very often.
+
+### In Method Definitions
+
+When we implement methods on a struct with lifetimes, we use the same syntax as that of generic type parameters. Where we declare and user the lifetime parameters depends on whether they're related to the struct fields or the method parameters and return values.
+
+Lifetime names for struct fields always need to be declared after the `impl` keyword and then used after teh struct's name because those lifetimes are part of the struct's type.
+
+In method signatures inside the `impl` block, references might be tied to the lifetime of references in the struct's fields, or they might be independent. In addition, the lifetime elision rules often make it so that litetime annotations aren't necessary in method signatures. 
+
+First we'll use a method named `level` whose only parameter is a reference to `self` and whose return value is an `i32`, which is not a reference to anything:
+
+```rust
+impl<'a> ImportantExcerpt<'a> {
+    fn level(&self) -> i32 {
+        3
+    }
+}
+```
+
+The lifetime parameter declaration after `impl` and its use after the type name are required, but becasue of the first elision rule, we're not required to annotate the lifetime of the reference to `self`.
+
+Here is an example where the third lifetime elision rule applies:
+
+```rust
+impl<'a> ImportantExcerpt<'a> {
+    fn announce_and_return_part(&self, announcement: &str) -> &str {
+        println!("Attention please: {announcement}");
+        self.part
+    }
+}
+```
+
+There are two input lifetimes, so Rust applies the first lifetime elision rule and gives both `&self` and `annoucement` their own lifetimes. Then because one of the parameter is `&self`, the return type gets the lifetime of `&self`, and all lifetimes have been accounted for.
+
+### The Static Lifetime
+
+One special lifetime we need to discuss is `'static`, which denotes that the affected reference `can` live for the entire duration of the program. All string literals have the `'static` lifetime, which we can annotate as follows:
+
+```rust
+let s: &'static str = "I have a static lifetime.";
+```
+
+The text of this string is stored directly in the program's binary, which is always available. Therefore, the lifetime of all string literals is `'static`.
+
+You might see suggestions in error messages to use the `'static` lifetime. But before specifying `'static` as the lifetime for a reference, think about whether or not the reference you have actually lives the entire lifetime of your program, and whether you want it to. Most of the time, an error message suggesting the `'static` lifetime results from attempting to create a dangling reference or a mismatch of the available lifetimes. In such cases, the solution is to fix those problems, not to specify the `'static` lifetime.
+
+
+### Generic Type Parameters, Trait Bounds, and Lifetimes
+
+Let's briefly look at the syntax of specifying generic type parameters, trait bounds, and lifetimes all in one function!
+
+```rust
+use std::fmt::Display;
+
+fn longest_with_an_announcement<'a, T>(
+    x: &'a str,
+    y: &'a str,
+    ann: T,
+) -> &'a str
+where
+    T: Display,
+{
+    println!("Announcement! {ann}");
+    if x.len() > y.len() { x } else { y }
+}
+```
+
+This is the `longest` function that returns the longer of two string slices. But now it has an extra parameter named `ann` of the generic type `T`, which can be filled in by any type that implements the `Display` trait as specified by the `where` clause. This extra parameter will be printed using `{}`, which is why the `Display` trait bound is necessary. Because lifetimes are a type of generic, the declarations of the lifetime parameter `'a` and the generic type parameter `T` go in the same list inside the angle brackets after the function name.
+
+
+
 
